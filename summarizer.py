@@ -10,7 +10,12 @@ from typing import Optional, Dict, Any
 load_dotenv()
 
 GEMINI_MODEL = "gemini-2.0-flash"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Try to get API key from Streamlit secrets first, then from environment
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except (KeyError, FileNotFoundError):
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Rate limiting and retry configuration
 MAX_RETRIES = 3
@@ -30,7 +35,17 @@ def call_gemini(prompt: str, temperature: float = 0.7, max_tokens: int = 2048) -
         Generated text response
     """
     if not GEMINI_API_KEY:
-        return "❌ GEMINI_API_KEY not found in environment variables."
+        st.error("⚠️ **GEMINI_API_KEY not configured!**")
+        st.info("""
+        **For Local Development:**
+        Add your API key to `.env` file: `GEMINI_API_KEY=your_key_here`
+        
+        **For Streamlit Cloud:**
+        1. Go to your app settings
+        2. Click 'Secrets' tab
+        3. Add: `GEMINI_API_KEY = "your_key_here"`
+        """)
+        return "❌ GEMINI_API_KEY not found in environment variables or Streamlit secrets."
     
     # Truncate prompt if too long
     if len(prompt) > MAX_INPUT_LENGTH:
