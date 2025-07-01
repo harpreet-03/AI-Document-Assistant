@@ -35,6 +35,8 @@ st.set_page_config(
 st.title("📄 AI Document Assistant with Memory ✨")
 st.markdown("Upload PDFs, get AI summaries, and ask intelligent questions with persistent memory!")
 
+# Force deployment refresh - Version 2.0
+
 # --- Feature Selection ---
 st.markdown("### Choose a Feature:")
 col_features = st.columns(2)
