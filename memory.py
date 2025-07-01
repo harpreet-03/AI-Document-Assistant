@@ -4,6 +4,7 @@ import faiss
 import numpy as np
 import pickle
 import os
+import hashlib
 from sentence_transformers import SentenceTransformer
 from parser import chunk_text
 import streamlit as st
@@ -14,322 +15,271 @@ def load_embedding_model():
     """Load and cache the sentence transformer model"""
     return SentenceTransformer("all-MiniLM-L6-v2")
 
-# Initialize global variables
-dimension = 384
-index = faiss.IndexFlatL2(dimension)
-stored_chunks = []
-metadata = []
+def get_user_session_id():
+    """Generate a unique session ID for each user"""
+    if 'user_session_id' not in st.session_state:
+        # Create unique session ID based on session state
+        session_info = str(st.session_state) + str(id(st.session_state))
+        st.session_state.user_session_id = hashlib.md5(session_info.encode()).hexdigest()[:12]
+    return st.session_state.user_session_id
 
-# Memory persistence
-MEMORY_FILE = "memory_store.pkl"
+def get_memory_file():
+    """Get user-specific memory file"""
+    session_id = get_user_session_id()
+    return f"memory_store_{session_id}.pkl"
+
+def initialize_user_memory():
+    """Initialize memory for current user session"""
+    if 'user_memory_initialized' not in st.session_state:
+        st.session_state.dimension = 384
+        st.session_state.index = faiss.IndexFlatL2(st.session_state.dimension)
+        st.session_state.stored_chunks = []
+        st.session_state.metadata = []
+        st.session_state.user_memory_initialized = True
+        load_memory()  # Load existing user data if any
 
 def save_memory():
-    """Save memory to disk"""
+    """Save memory to disk for current user"""
     try:
-        if len(stored_chunks) == 0:
+        initialize_user_memory()
+        if len(st.session_state.stored_chunks) == 0:
             return  # Nothing to save
             
-        with open(MEMORY_FILE, 'wb') as f:
+        memory_file = get_memory_file()
+        with open(memory_file, 'wb') as f:
             pickle.dump({
-                'chunks': stored_chunks,
-                'metadata': metadata,
-                'index': faiss.serialize_index(index)
+                'chunks': st.session_state.stored_chunks,
+                'metadata': st.session_state.metadata,
+                'index': faiss.serialize_index(st.session_state.index)
             }, f)
     except Exception as e:
         st.error(f"Failed to save memory: {e}")
 
 def load_memory():
-    """Load memory from disk"""
-    global index, stored_chunks, metadata
+    """Load memory from disk for current user"""
     try:
-        if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, 'rb') as f:
+        initialize_user_memory()
+        memory_file = get_memory_file()
+        if os.path.exists(memory_file):
+            with open(memory_file, 'rb') as f:
                 data = pickle.load(f)
-                stored_chunks.clear()
-                metadata.clear()
-                stored_chunks.extend(data['chunks'])
-                metadata.extend(data['metadata'])
-                index = faiss.deserialize_index(data['index'])
-                return True
-        return False
+                st.session_state.stored_chunks.clear()
+                st.session_state.metadata.clear()
+                st.session_state.stored_chunks.extend(data['chunks'])
+                st.session_state.metadata.extend(data['metadata'])
+                st.session_state.index = faiss.deserialize_index(data['index'])
     except Exception as e:
         st.error(f"Failed to load memory: {e}")
-        return False
+        # Initialize fresh memory on error
+        st.session_state.index = faiss.IndexFlatL2(st.session_state.dimension)
+        st.session_state.stored_chunks.clear()
+        st.session_state.metadata.clear()
 
-# Load memory on module import
-load_memory()
-
-def add_to_memory(text: str, doc_name: str = "Unknown", doc_type: str = "General"):
-    """
-    Add text to memory by chunking it and storing embeddings.
-    
-    Args:
-        text: The text content to store
-        doc_name: Name of the document
-        doc_type: Type of document
-    """
+def store_document(filename, text, doc_type="Unknown"):
+    """Store document in memory with user isolation"""
     try:
-        if not text or not text.strip():
-            raise ValueError("Text cannot be empty")
-        
-        # Load the embedding model
-        embedding_model = load_embedding_model()
+        initialize_user_memory()
+        model = load_embedding_model()
         
         # Chunk the text
         chunks = chunk_text(text)
-        if not chunks:
-            raise ValueError("No chunks generated from text")
         
-        # Generate embeddings
-        vectors = embedding_model.encode(chunks)
-        
-        # Ensure vectors have the correct shape
-        if len(vectors.shape) == 1:
-            vectors = vectors.reshape(1, -1)
-        
-        # Add to FAISS index
-        index.add(np.array(vectors, dtype=np.float32))
-        
-        # Store chunks and metadata
-        stored_chunks.extend(chunks)
-        metadata.extend([{"name": doc_name, "type": doc_type}] * len(chunks))
+        for chunk in chunks:
+            if len(chunk.strip()) < 10:  # Skip very short chunks
+                continue
+                
+            # Create embedding
+            embedding = model.encode([chunk])[0]
+            
+            # Add to index
+            st.session_state.index.add(np.array([embedding]))
+            
+            # Store chunk and metadata
+            st.session_state.stored_chunks.append(chunk)
+            st.session_state.metadata.append({
+                'filename': filename,
+                'doc_type': doc_type,
+                'chunk_id': len(st.session_state.stored_chunks) - 1,
+                'text_preview': chunk[:100] + "..." if len(chunk) > 100 else chunk
+            })
         
         # Save to disk
         save_memory()
-        
         return True
         
     except Exception as e:
-        st.error(f"Error adding to memory: {e}")
+        st.error(f"Failed to store document: {e}")
         return False
 
-def search_memory(query: str, top_k: int = 3):
-    """
-    Search for relevant chunks in memory based on the query.
-    
-    Args:
-        query: Search query
-        top_k: Number of top results to return
-    
-    Returns:
-        List of relevant text chunks
-    """
+def search_documents(query, k=5):
+    """Search for relevant documents for current user"""
     try:
-        if not query or not query.strip():
+        initialize_user_memory()
+        
+        if len(st.session_state.stored_chunks) == 0:
             return []
         
-        if len(stored_chunks) == 0:
-            return []
+        model = load_embedding_model()
+        query_embedding = model.encode([query])[0]
         
-        # Load the embedding model
-        embedding_model = load_embedding_model()
+        # Search in user's index
+        distances, indices = st.session_state.index.search(np.array([query_embedding]), k)
         
-        # Generate query embedding
-        query_vector = embedding_model.encode([query])
-        
-        # Ensure query vector has correct shape
-        if len(query_vector.shape) == 1:
-            query_vector = query_vector.reshape(1, -1)
-        
-        # Search in FAISS index
-        distances, indices = index.search(np.array(query_vector, dtype=np.float32), min(top_k, len(stored_chunks)))
-        
-        # Get results with relevance scores
         results = []
-        for i, distance in zip(indices[0], distances[0]):
-            if i < len(stored_chunks) and i >= 0:  # Valid index check
+        for i, idx in enumerate(indices[0]):
+            if idx < len(st.session_state.stored_chunks):
                 results.append({
-                    'text': stored_chunks[i],
-                    'score': float(distance),
-                    'metadata': metadata[i] if i < len(metadata) else {}
-                })
-        
-        # Return just the text for backward compatibility
-        return [result['text'] for result in results]
-        
-    except Exception as e:
-        st.error(f"Error searching memory: {e}")
-        return []
-
-def search_memory_with_scores(query: str, top_k: int = 3):
-    """
-    Search for relevant chunks with similarity scores and metadata.
-    
-    Args:
-        query: Search query
-        top_k: Number of top results to return
-    
-    Returns:
-        List of dictionaries with text, score, and metadata
-    """
-    try:
-        if not query or not query.strip():
-            return []
-        
-        if len(stored_chunks) == 0:
-            return []
-        
-        # Load the embedding model
-        embedding_model = load_embedding_model()
-        
-        # Generate query embedding
-        query_vector = embedding_model.encode([query])
-        
-        # Ensure query vector has correct shape
-        if len(query_vector.shape) == 1:
-            query_vector = query_vector.reshape(1, -1)
-        
-        # Search in FAISS index
-        distances, indices = index.search(np.array(query_vector, dtype=np.float32), min(top_k, len(stored_chunks)))
-        
-        # Get results with relevance scores
-        results = []
-        for i, distance in zip(indices[0], distances[0]):
-            if i < len(stored_chunks) and i >= 0:  # Valid index check
-                results.append({
-                    'text': stored_chunks[i],
-                    'score': float(distance),
-                    'metadata': metadata[i] if i < len(metadata) else {},
-                    'relevance': max(0, 1 - distance / 2)  # Convert distance to relevance score
+                    'text': st.session_state.stored_chunks[idx],
+                    'metadata': st.session_state.metadata[idx],
+                    'similarity': float(1 / (1 + distances[0][i]))  # Convert distance to similarity
                 })
         
         return results
         
     except Exception as e:
-        st.error(f"Error searching memory: {e}")
+        st.error(f"Search failed: {e}")
         return []
 
-def get_memory_stats():
-    """
-    Get statistics about the current memory state.
-    
-    Returns:
-        Dictionary with memory statistics
-    """
-    unique_docs = set(meta.get("name", "Unknown") for meta in metadata)
-    return {
-        "total_chunks": len(stored_chunks),
-        "total_documents": len(unique_docs),
-        "index_size": index.ntotal if hasattr(index, 'ntotal') else 0,
-        "document_names": list(unique_docs),
-        "memory_file_exists": os.path.exists(MEMORY_FILE)
-    }
-
-def clear_memory():
-    """
-    Clear all stored memory and remove the persistence file.
-    """
-    global index, stored_chunks, metadata
-    index = faiss.IndexFlatL2(dimension)
-    stored_chunks.clear()
-    metadata.clear()
-    
-    # Remove the persistence file
+def get_all_documents():
+    """Get all documents for current user"""
     try:
-        if os.path.exists(MEMORY_FILE):
-            os.remove(MEMORY_FILE)
+        initialize_user_memory()
+        
+        # Group by filename
+        documents = {}
+        for meta in st.session_state.metadata:
+            filename = meta['filename']
+            if filename not in documents:
+                documents[filename] = {
+                    'filename': filename,
+                    'doc_type': meta['doc_type'],
+                    'chunks': 0,
+                    'preview': meta['text_preview']
+                }
+            documents[filename]['chunks'] += 1
+        
+        return list(documents.values())
+        
     except Exception as e:
-        st.error(f"Failed to remove memory file: {e}")
+        st.error(f"Failed to get documents: {e}")
+        return []
 
-def get_document_chunks(doc_name: str):
-    """
-    Get all chunks for a specific document.
-    
-    Args:
-        doc_name: Name of the document
-    
-    Returns:
-        List of chunks from the specified document
-    """
-    doc_chunks = []
-    for i, meta in enumerate(metadata):
-        if meta.get("name") == doc_name and i < len(stored_chunks):
-            doc_chunks.append(stored_chunks[i])
-    return doc_chunks
-
-def remove_document(doc_name: str):
-    """
-    Remove all chunks from a specific document.
-    
-    Args:
-        doc_name: Name of the document to remove
-    
-    Returns:
-        Boolean indicating success
-    """
+def remove_document(filename):
+    """Remove document from current user's memory"""
     try:
-        global index, stored_chunks, metadata
+        initialize_user_memory()
         
         # Find indices to remove
         indices_to_remove = []
-        for i, meta in enumerate(metadata):
-            if meta.get("name") == doc_name:
+        for i, meta in enumerate(st.session_state.metadata):
+            if meta['filename'] == filename:
                 indices_to_remove.append(i)
         
         if not indices_to_remove:
-            return False  # Document not found
+            return False
         
-        # Remove in reverse order to maintain indices
-        for i in reversed(indices_to_remove):
-            if i < len(stored_chunks):
-                stored_chunks.pop(i)
-            if i < len(metadata):
-                metadata.pop(i)
+        # Remove in reverse order to avoid index shifting
+        for idx in reversed(indices_to_remove):
+            st.session_state.stored_chunks.pop(idx)
+            st.session_state.metadata.pop(idx)
         
-        # Rebuild FAISS index (this is expensive but necessary)
-        if stored_chunks:
-            embedding_model = load_embedding_model()
-            vectors = embedding_model.encode(stored_chunks)
-            if len(vectors.shape) == 1:
-                vectors = vectors.reshape(1, -1)
-            
-            # Create new index
-            index = faiss.IndexFlatL2(dimension)
-            index.add(np.array(vectors, dtype=np.float32))
-        else:
-            # Empty index
-            index = faiss.IndexFlatL2(dimension)
+        # Rebuild index
+        st.session_state.index = faiss.IndexFlatL2(st.session_state.dimension)
+        if st.session_state.stored_chunks:
+            model = load_embedding_model()
+            embeddings = model.encode(st.session_state.stored_chunks)
+            st.session_state.index.add(np.array(embeddings))
         
-        # Save updated memory
+        # Update chunk_ids in metadata
+        for i, meta in enumerate(st.session_state.metadata):
+            meta['chunk_id'] = i
+        
         save_memory()
         return True
         
     except Exception as e:
-        st.error(f"Error removing document: {e}")
+        st.error(f"Failed to remove document: {e}")
         return False
 
-def get_all_documents():
-    """
-    Get all documents stored in memory with their metadata.
-    
-    Returns:
-        List of dictionaries containing document information
-    """
-    documents = {}
-    
-    # Group chunks by document name
-    for i, meta in enumerate(metadata):
-        doc_name = meta.get("name", "Unknown")
-        doc_type = meta.get("type", "General")
+def get_context_for_query(query, max_chunks=3):
+    """Get relevant context for a query from current user's documents"""
+    try:
+        initialize_user_memory()
         
-        if doc_name not in documents:
-            documents[doc_name] = {
-                'name': doc_name,
-                'type': doc_type,
-                'chunk_count': 0,
-                'total_text_length': 0,
-                'first_chunk_preview': ""
-            }
+        if len(st.session_state.stored_chunks) == 0:
+            return "No documents found in memory."
         
-        documents[doc_name]['chunk_count'] += 1
+        results = search_documents(query, k=max_chunks)
         
-        # Add text length if we have the chunk
-        if i < len(stored_chunks):
-            chunk_text = stored_chunks[i]
-            documents[doc_name]['total_text_length'] += len(chunk_text)
-            
-            # Store preview of first chunk
-            if documents[doc_name]['chunk_count'] == 1:
-                documents[doc_name]['first_chunk_preview'] = chunk_text[:200] + "..." if len(chunk_text) > 200 else chunk_text
-    
-    return list(documents.values())
+        if not results:
+            return "No relevant information found."
+        
+        context_parts = []
+        for result in results:
+            context_parts.append(f"From {result['metadata']['filename']}:\n{result['text']}")
+        
+        return "\n\n---\n\n".join(context_parts)
+        
+    except Exception as e:
+        st.error(f"Failed to get context: {e}")
+        return "Error retrieving context."
+
+def clear_all_memory():
+    """Clear all memory for current user"""
+    try:
+        initialize_user_memory()
+        
+        st.session_state.stored_chunks.clear()
+        st.session_state.metadata.clear()
+        st.session_state.index = faiss.IndexFlatL2(st.session_state.dimension)
+        
+        # Remove user's memory file
+        memory_file = get_memory_file()
+        if os.path.exists(memory_file):
+            os.remove(memory_file)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Failed to clear memory: {e}")
+        return False
+
+def get_memory_stats():
+    """Get memory statistics for current user"""
+    try:
+        initialize_user_memory()
+        
+        total_chunks = len(st.session_state.stored_chunks)
+        unique_docs = len(set(meta['filename'] for meta in st.session_state.metadata))
+        
+        return {
+            "total_chunks": total_chunks,
+            "unique_documents": unique_docs,
+            "memory_file_exists": os.path.exists(get_memory_file()),
+            "session_id": get_user_session_id()
+        }
+        
+    except Exception as e:
+        st.error(f"Failed to get memory stats: {e}")
+        return {"error": str(e)}
+
+def get_document_text(filename):
+    """Get full text of a document for current user"""
+    try:
+        initialize_user_memory()
+        
+        chunks = []
+        for i, meta in enumerate(st.session_state.metadata):
+            if meta['filename'] == filename:
+                chunks.append(st.session_state.stored_chunks[i])
+        
+        return "\n\n".join(chunks) if chunks else None
+        
+    except Exception as e:
+        st.error(f"Failed to get document text: {e}")
+        return None
+
+# Initialize memory on import
+if 'memory_initialized' not in st.session_state:
+    initialize_user_memory()
+    st.session_state.memory_initialized = True
