@@ -254,14 +254,15 @@ def get_memory_stats():
         
         return {
             "total_chunks": total_chunks,
-            "unique_documents": unique_docs,
+            "total_documents": unique_docs,  # Changed to match app expectation
+            "unique_documents": unique_docs,  # Keep both for compatibility
             "memory_file_exists": os.path.exists(get_memory_file()),
             "session_id": get_user_session_id()
         }
         
     except Exception as e:
         st.error(f"Failed to get memory stats: {e}")
-        return {"error": str(e)}
+        return {"error": str(e), "total_documents": 0, "total_chunks": 0}
 
 def get_document_text(filename):
     """Get full text of a document for current user"""

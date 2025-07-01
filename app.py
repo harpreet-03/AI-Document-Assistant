@@ -259,9 +259,9 @@ ANSWER:"""
                     with st.expander("📚 Source Information", expanded=False):
                         st.write("**Most relevant document chunks:**")
                         for i, result in enumerate(context_results[:3], 1):
-                            relevance_pct = result['relevance'] * 100
-                            doc_name = result['metadata'].get('name', 'Unknown')
-                            st.write(f"**{i}. {doc_name}** (Relevance: {relevance_pct:.1f}%)")
+                            similarity_pct = result['similarity'] * 100
+                            doc_name = result['metadata'].get('filename', 'Unknown')
+                            st.write(f"**{i}. {doc_name}** (Similarity: {similarity_pct:.1f}%)")
                             st.write(f"_{result['text'][:200]}..._")
                             st.write("---")
                     
@@ -482,13 +482,13 @@ elif st.session_state.current_feature == "ats_scorer":
         
         # Get memory documents filtered for resumes
         memory_docs = get_all_documents()
-        resume_docs = [doc for doc in memory_docs if doc['type'] == 'Resume']
+        resume_docs = [doc for doc in memory_docs if doc['doc_type'] == 'Resume']
         
         if resume_docs:
             for doc in resume_docs[-3:]:  # Show last 3 resume analyses
-                with st.expander(f"📄 {doc['name'][:20]}..."):
-                    st.write(f"**Chunks:** {doc['chunk_count']}")
-                    st.write(f"**Preview:** {doc['first_chunk_preview'][:100]}...")
+                with st.expander(f"📄 {doc['filename'][:20]}..."):
+                    st.write(f"**Chunks:** {doc['chunks']}")
+                    st.write(f"**Preview:** {doc['preview'][:100]}...")
         else:
             st.write("No resume analyses yet")
 
