@@ -3,13 +3,13 @@
 <div align="center">
 
 ![AI Document Assistant](https://img.shields.io/badge/AI-Document%20Assistant-blue?style=for-the-badge&logo=streamlit)
-![Python](https://img.shields.io/badge/Python-3.8+-blue?style=for-the-badge&logo=python)
+![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
 ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white)
 
 *An intelligent document analysis platform powered by Google Gemini AI*
 
-[🚀 Live Demo](https://your-app-url.streamlit.app) • [📖 Documentation](#documentation) • [🤝 Contributing](#contributing)
+[🚀 Live Demo](https://harpreet-03-ai-assistant-app-dpkcwa.streamlit.app) • [📖 Documentation](#documentation) • [🤝 Contributing](#contributing)
 
 </div>
 
@@ -333,12 +333,6 @@ TOP_K = 40              # Top-k sampling
 - **Vector Search**: Implementing semantic similarity with FAISS
 - **NLP Techniques**: Text processing, entity extraction, and classification
 
-#### **Full-Stack Development**
-- **Frontend**: Advanced Streamlit components and custom styling
-- **Backend**: Python architecture with modular design
-- **Database**: Persistent storage with pickle serialization
-- **API Integration**: RESTful API consumption with error handling
-
 #### **Software Engineering**
 - **Clean Architecture**: Separation of concerns and modular design
 - **Error Handling**: Robust exception management and user feedback
@@ -385,7 +379,7 @@ Found a bug? Please open an issue with:
 - Screenshots if applicable
 
 ### **✨ Feature Requests**
-Have an idea? We'd love to hear it:
+Have an idea? I'd love to hear it:
 - Describe the feature and its benefits
 - Provide use cases and examples
 - Consider implementation complexity
@@ -459,7 +453,6 @@ Built with love for the developer and AI community, this project serves as both 
 [![GitHub Stars](https://img.shields.io/github/stars/yourusername/ai-document-assistant?style=social)](https://github.com/yourusername/ai-document-assistant)
 [![GitHub Forks](https://img.shields.io/github/forks/yourusername/ai-document-assistant?style=social)](https://github.com/yourusername/ai-document-assistant)
 
-[🚀 Deploy Your Own](https://share.streamlit.io) • [📧 Contact](mailto:your.email@example.com) • [🌐 Portfolio](https://yourportfolio.com)
 
 </div>
 
