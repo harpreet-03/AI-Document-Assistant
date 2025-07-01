@@ -6,8 +6,8 @@ import pandas as pd
 from parser import extract_text_from_pdf, extract_metadata, get_text_statistics
 from summarizer import (generate_summary_and_tasks, call_gemini_for_qa, 
                        generate_questions, extract_entities, detect_document_type, analyze_ats_score)
-from memory import (add_to_memory, search_memory, get_memory_stats, 
-                   clear_memory, search_memory_with_scores, get_document_chunks, get_all_documents, remove_document)
+from memory import (store_document, search_documents, get_memory_stats, 
+                   clear_all_memory, get_all_documents, remove_document, get_context_for_query, get_document_text)
 
 # Load environment variables
 load_dotenv()
@@ -107,9 +107,9 @@ if st.session_state.current_feature == "document_analysis":
                     with col_save:
                         if st.button("💾 Save to Memory", type="primary"):
                             try:
-                                success = add_to_memory(
+                                success = store_document(
+                                    pdf_file.name,
                                     raw_text + "\n\n" + summary_and_tasks, 
-                                    doc_name=pdf_file.name,
                                     doc_type="PDF"
                                 )
                                 if success:
@@ -222,7 +222,7 @@ if st.session_state.current_feature == "document_analysis":
         with st.spinner("🔍 Searching memory and generating answer..."):
             try:
                 # Get enhanced search results with scores
-                context_results = search_memory_with_scores(query, top_k=5)
+                context_results = search_documents(query, k=5)
                 
                 if context_results:
                     # Prepare context for AI
@@ -299,7 +299,7 @@ ANSWER:"""
     col_clear, col_export = st.columns(2)
     with col_clear:
         if st.button("🗑️ Clear Memory", help="Clear all stored documents"):
-            clear_memory()
+            clear_all_memory()
             st.session_state.chat_history = []
             st.session_state.uploaded_docs = []
             st.success("Memory cleared!")
@@ -330,33 +330,32 @@ ANSWER:"""
     
     if memory_documents:
         for i, doc in enumerate(memory_documents):
-            with st.expander(f"📄 {doc['name'][:25]}{'...' if len(doc['name']) > 25 else ''}"):
-                st.write(f"**Type:** {doc['type']}")
-                st.write(f"**Chunks:** {doc['chunk_count']}")
-                st.write(f"**Text Length:** {doc['total_text_length']:,} characters")
+            with st.expander(f"📄 {doc['filename'][:25]}{'...' if len(doc['filename']) > 25 else ''}"):
+                st.write(f"**Type:** {doc['doc_type']}")
+                st.write(f"**Chunks:** {doc['chunks']}")
                 
                 # Show preview of document content
-                if doc['first_chunk_preview']:
+                if doc['preview']:
                     st.write("**Preview:**")
-                    st.write(f"_{doc['first_chunk_preview']}_")
+                    st.write(f"_{doc['preview']}_")
                 
                 # Option to view all document chunks
                 if st.button(f"👁️ View All Chunks", key=f"view_memory_{i}"):
-                    chunks = get_document_chunks(doc['name'])
+                    chunks = get_document_text(doc['filename'])
                     if chunks:
-                        st.text_area("All Document Chunks", "\n\n---\n\n".join(chunks), height=300, key=f"chunks_{i}")
+                        st.text_area("All Document Chunks", chunks, height=300, key=f"chunks_{i}")
                     else:
                         st.write("No chunks found for this document.")
                 
                 # Option to remove document from memory
                 if st.button(f"🗑️ Remove Document", key=f"remove_{i}", help="Remove this document from memory"):
                     try:
-                        success = remove_document(doc['name'])
+                        success = remove_document(doc['filename'])
                         if success:
-                            st.success(f"✅ Document '{doc['name']}' removed from memory!")
+                            st.success(f"✅ Document '{doc['filename']}' removed from memory!")
                             st.rerun()
                         else:
-                            st.error(f"❌ Document '{doc['name']}' not found in memory")
+                            st.error(f"❌ Document '{doc['filename']}' not found in memory")
                     except Exception as e:
                         st.error(f"❌ Error removing document: {e}")
     else:
@@ -438,9 +437,9 @@ elif st.session_state.current_feature == "ats_scorer":
                                 # Option to save to memory
                                 if st.button("💾 Save Resume to Memory"):
                                     try:
-                                        success = add_to_memory(
+                                        success = store_document(
+                                            f"ATS_Analysis_{resume_file.name}",
                                             resume_text + "\n\n" + ats_result["analysis"], 
-                                            doc_name=f"ATS_Analysis_{resume_file.name}",
                                             doc_type="Resume"
                                         )
                                         if success:
