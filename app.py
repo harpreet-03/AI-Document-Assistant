@@ -7,7 +7,8 @@ from parser import extract_text_from_pdf, extract_metadata, get_text_statistics
 from summarizer import (generate_summary_and_tasks, call_gemini_for_qa, 
                        generate_questions, extract_entities, detect_document_type, analyze_ats_score)
 from memory import (store_document, search_documents, get_memory_stats, 
-                   clear_all_memory, get_all_documents, remove_document, get_context_for_query, get_document_text)
+                   clear_all_memory, get_all_documents, remove_document, get_context_for_query, get_document_text,
+                   save_chat_history, load_chat_history, clear_chat_history)
 
 # Load environment variables
 load_dotenv()
@@ -20,10 +21,34 @@ if not os.getenv("GEMINI_API_KEY"):
 
 # Initialize session state
 if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+    # Try to load existing chat history
+    st.session_state.chat_history = load_chat_history()
 
 if 'uploaded_docs' not in st.session_state:
     st.session_state.uploaded_docs = []
+
+# Load persistent memory stats to maintain session across refreshes
+if 'memory_loaded' not in st.session_state:
+    try:
+        # Get current memory stats to check if we have persistent data
+        memory_stats = get_memory_stats()
+        if memory_stats['memory_file_exists'] and memory_stats['total_documents'] > 0:
+            # Load existing documents info for the session
+            all_docs = get_all_documents()
+            if all_docs:
+                # Restore uploaded docs list from memory
+                st.session_state.uploaded_docs = [
+                    {
+                        'name': doc.get('filename', 'Unknown'),
+                        'timestamp': doc.get('timestamp', 'Unknown'),
+                        'type': doc.get('doc_type', 'Document'),
+                        'size': 'N/A'
+                    } for doc in all_docs
+                ]
+        st.session_state.memory_loaded = True
+    except Exception as e:
+        # If there's an error loading memory, just continue with empty state
+        st.session_state.memory_loaded = True
 
 # --- Streamlit UI Setup ---
 st.set_page_config(
@@ -176,7 +201,9 @@ if st.session_state.current_feature == "document_analysis":
                     if questions:
                         st.write("Here are some questions you might want to ask about this document:")
                         for i, question in enumerate(questions, 1):
-                            if st.button(f"{i}. {question}", key=f"q_{i}"):
+                            # Use a unique key for each question button
+                            question_key = f"suggested_q_{hash(question)}_{i}"
+                            if st.button(f"{i}. {question}", key=question_key):
                                 # Set the question in session state and trigger processing
                                 st.session_state.selected_question = question
                                 st.rerun()
@@ -191,8 +218,44 @@ if st.session_state.current_feature == "document_analysis":
         memory_stats = get_memory_stats()
         if memory_stats['total_documents'] > 0:
             st.success(f"💾 Memory contains {memory_stats['total_documents']} documents with {memory_stats['total_chunks']} chunks")
+            
+            # Show suggested questions from memory
+            with st.expander("💡 Suggested Questions from Your Documents", expanded=False):
+                try:
+                    # Get a sample of text from memory to generate questions
+                    all_docs = get_all_documents()
+                    if all_docs:
+                        # Combine some text from all documents
+                        combined_text = ""
+                        for doc in all_docs[:3]:  # Limit to first 3 docs for performance
+                            # Get actual document text using the get_document_text function
+                            doc_text = get_document_text(doc['filename'])
+                            if doc_text:
+                                combined_text += f"{doc_text[:500]}\n\n"  # First 500 chars per doc
+                        
+                        if combined_text:
+                            with st.spinner("Generating questions from your document collection..."):
+                                memory_questions = generate_questions(combined_text, count=5)
+                            
+                            if memory_questions:
+                                cols = st.columns(2)
+                                for i, question in enumerate(memory_questions):
+                                    col_idx = i % 2
+                                    with cols[col_idx]:
+                                        # Use unique key for memory questions
+                                        memory_q_key = f"memory_q_{hash(question)}_{i}"
+                                        if st.button(f"❓ {question}", key=memory_q_key, use_container_width=True):
+                                            st.session_state.selected_question = question
+                                            st.rerun()
+                except Exception as e:
+                    st.write("Could not generate questions from memory.")
         else:
             st.warning("📝 No documents in memory. Upload and save some documents first!")
+
+        # Initialize query and processing flags
+        query = ""
+        process_question = False
+        question_source = ""
 
         # Handle selected question from suggested questions
         if 'selected_question' in st.session_state:
@@ -208,14 +271,16 @@ if st.session_state.current_feature == "document_analysis":
                 "Ask a question about your documents:",
                 placeholder="e.g., What are my upcoming deadlines? Summarize the main points..."
             )
-            process_question = bool(query)
-            question_source = "text input"
+            
+            # Only process if user explicitly submitted by pressing Enter or clicking a button
+            # Check if the query has actually changed or if there's a submit button
+            if query and query.strip():
+                # Add a submit button to make question submission explicit
+                if st.button("❓ Ask Question", type="primary"):
+                    process_question = True
+                    question_source = "manual input"
 
-        # Clear the auto question after it's been used in the text input
-        # Only clear if the query is not empty (meaning user has seen the question)
-        if 'auto_question' in st.session_state and query:
-            del st.session_state.auto_question
-
+        # Only process if explicitly requested
         if process_question and query and memory_stats['total_documents'] > 0:
             # Show the question being processed
             st.write(f"**Question:** {query}")
@@ -266,12 +331,16 @@ ANSWER:"""
                             st.write("---")
                     
                     # Add to chat history
-                    st.session_state.chat_history.append({
+                    chat_entry = {
                         'question': query,
                         'answer': response,
                         'timestamp': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
                         'sources': len(context_results)
-                    })
+                    }
+                    st.session_state.chat_history.append(chat_entry)
+                    
+                    # Save chat history persistently
+                    save_chat_history(st.session_state.chat_history)
                 else:
                     st.warning("🔍 No relevant information found in memory for your question.")
             except Exception as e:
@@ -302,9 +371,10 @@ ANSWER:"""
     with col_clear:
         if st.button("🗑️ Clear Memory", help="Clear all stored documents"):
             clear_all_memory()
+            clear_chat_history()
             st.session_state.chat_history = []
             st.session_state.uploaded_docs = []
-            st.success("Memory cleared!")
+            st.success("Memory and chat history cleared!")
             st.rerun()
     
     with col_export:

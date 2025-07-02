@@ -46,3 +46,4 @@ Thumbs.db
 # User-specific memory files (PRIVACY PROTECTION)
 memory_store_*.pkl
 memory_store.pkl
+chat_history_*.pkl

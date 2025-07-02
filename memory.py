@@ -28,6 +28,11 @@ def get_memory_file():
     session_id = get_user_session_id()
     return f"memory_store_{session_id}.pkl"
 
+def get_chat_history_file():
+    """Get user-specific chat history file"""
+    session_id = get_user_session_id()
+    return f"chat_history_{session_id}.pkl"
+
 def initialize_user_memory():
     """Initialize memory for current user session"""
     if 'user_memory_initialized' not in st.session_state:
@@ -74,6 +79,36 @@ def load_memory():
         st.session_state.index = faiss.IndexFlatL2(st.session_state.dimension)
         st.session_state.stored_chunks.clear()
         st.session_state.metadata.clear()
+
+def save_chat_history(chat_history):
+    """Save chat history to disk for current user"""
+    try:
+        chat_file = get_chat_history_file()
+        with open(chat_file, 'wb') as f:
+            pickle.dump(chat_history, f)
+    except Exception as e:
+        st.error(f"Failed to save chat history: {e}")
+
+def load_chat_history():
+    """Load chat history from disk for current user"""
+    try:
+        chat_file = get_chat_history_file()
+        if os.path.exists(chat_file):
+            with open(chat_file, 'rb') as f:
+                return pickle.load(f)
+        return []
+    except Exception as e:
+        st.error(f"Failed to load chat history: {e}")
+        return []
+
+def clear_chat_history():
+    """Clear chat history for current user"""
+    try:
+        chat_file = get_chat_history_file()
+        if os.path.exists(chat_file):
+            os.remove(chat_file)
+    except Exception as e:
+        st.error(f"Failed to clear chat history: {e}")
 
 def store_document(filename, text, doc_type="Unknown"):
     """Store document in memory with user isolation"""

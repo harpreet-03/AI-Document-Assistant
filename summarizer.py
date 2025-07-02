@@ -344,18 +344,19 @@ Format your response as a simple list under each category. If a category has no 
     except:
         return {"entities": "Entity extraction unavailable"}
 
-def generate_questions(text: str) -> list:
+def generate_questions(text: str, count: int = 5) -> list:
     """
     Generate intelligent questions that can be asked about the document.
     
     Args:
         text: Document text
+        count: Number of questions to generate (default 5)
     
     Returns:
         List of suggested questions
     """
     questions_prompt = f"""
-Based on this document, generate 5-7 intelligent questions that someone might want to ask about it. 
+Based on this document, generate {count} intelligent questions that someone might want to ask about it. 
 Make the questions specific and useful for understanding or working with this content.
 
 Document sample:
@@ -376,7 +377,7 @@ Format your response as a numbered list of questions only.
                     question = line.split('.', 1)[-1].strip()
                     if question and question.endswith('?'):
                         questions.append(question)
-            return questions[:7]  # Limit to 7 questions
+            return questions[:count]  # Limit to requested count
         return []
     except:
         return []
